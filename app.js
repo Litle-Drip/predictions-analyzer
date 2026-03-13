@@ -24,8 +24,8 @@ async function analyze() {
       if (!eventPart) throw new Error("Invalid Polymarket URL. Expected: polymarket.com/event/<slug>")
       const slug = eventPart.split("?")[0].split("#")[0].replace(/\/$/, "")
 
-      // Gamma API expects slug as a query param and returns an array
-      const api = `https://gamma-api.polymarket.com/events?slug=${slug}`
+      // Use the local server proxy to avoid CORS/ad-blocker issues
+      const api = `/api/polymarket?slug=${encodeURIComponent(slug)}`
 
       const res = await fetch(api)
 

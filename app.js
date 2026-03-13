@@ -89,6 +89,8 @@ async function analyze() {
 
       const data = await res.json()
 
+      console.log("Kalshi raw response:", JSON.stringify(data, null, 2))
+
       if (!res.ok) throw new Error(data.error || `API request failed with status ${res.status}`)
 
       // Market URL response: { market: { title, yes_bid, no_bid, volume } }

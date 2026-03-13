@@ -1,35 +1,51 @@
 const https = require("https")
+const crypto = require("crypto")
 
 module.exports = (req, res) => {
-  const apiKey = process.env.KALSHI_API_KEY
+  const keyId = process.env.KALSHI_API_KEY_ID
+  const privateKey = process.env.KALSHI_PRIVATE_KEY
 
-  if (!apiKey) {
-    res.status(503).json({ error: "Kalshi API key not configured. Add KALSHI_API_KEY to Vercel environment variables." })
+  if (!keyId || !privateKey) {
+    res.status(503).json({ error: "Kalshi API credentials not configured. Add KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY to Vercel environment variables." })
     return
   }
 
   const ticker = req.query.ticker
+  const type = req.query.type  // "market" or "event" — passed explicitly from the frontend
 
   if (!ticker) {
     res.status(400).json({ error: "Missing ticker" })
     return
   }
 
-  // Determine if this is a market ticker (e.g. FED-25MAR-T4.5) or event ticker (e.g. FED-25MAR)
-  // Market tickers have 3+ dash-separated segments; event tickers have 2
-  const segments = ticker.split("-")
-  const isMarket = segments.length >= 3
+  const isMarket = type === "market"
 
-  const path = isMarket
+  // Path without query string is used for signing
+  const basePath = isMarket
     ? `/trade-api/v2/markets/${encodeURIComponent(ticker)}`
-    : `/trade-api/v2/events/${encodeURIComponent(ticker)}?with_nested_markets=true`
+    : `/trade-api/v2/events/${encodeURIComponent(ticker)}`
+
+  const apiPath = isMarket ? basePath : `${basePath}?with_nested_markets=true`
+
+  // Build RSA signature: sign( timestamp + "GET" + path )
+  const timestamp = Date.now().toString()
+  const msgString = timestamp + "GET" + basePath
+  let signature
+  try {
+    signature = crypto.createSign("RSA-SHA256").update(msgString).sign(privateKey, "base64")
+  } catch (err) {
+    res.status(500).json({ error: `Failed to sign request: ${err.message}` })
+    return
+  }
 
   const options = {
     hostname: "trading-api.kalshi.com",
-    path,
+    path: apiPath,
     method: "GET",
     headers: {
-      "Authorization": apiKey,
+      "KALSHI-ACCESS-KEY": keyId,
+      "KALSHI-ACCESS-TIMESTAMP": timestamp,
+      "KALSHI-ACCESS-SIGNATURE": signature,
       "Content-Type": "application/json",
     },
   }

@@ -24,12 +24,16 @@ async function analyze() {
       if (!eventPart) throw new Error("Invalid Polymarket URL. Expected: polymarket.com/event/<slug>")
       const slug = eventPart.split("?")[0].split("#")[0].replace(/\/$/, "")
 
-      // Route through CORS proxy — the Gamma API does not send CORS headers,
-      // so direct browser fetch from file:// or unapproved origins is blocked.
       const directApi = `https://gamma-api.polymarket.com/events?slug=${slug}`
-      const api = `https://corsproxy.io/?${encodeURIComponent(directApi)}`
 
-      const res = await fetch(api)
+      // Try direct fetch first; fall back to CORS proxy if the browser blocks it
+      let res
+      try {
+        res = await fetch(directApi)
+      } catch {
+        const proxyApi = `https://api.allorigins.win/raw?url=${encodeURIComponent(directApi)}`
+        res = await fetch(proxyApi)
+      }
 
       if (!res.ok) throw new Error(`API request failed with status ${res.status}`)
 

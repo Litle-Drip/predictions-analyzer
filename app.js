@@ -99,9 +99,9 @@ function calcAnalyticsRow(label, prob, ask, bid) {
   return { label, breakEven, ev: parseFloat(ev), spread: spread !== null ? parseFloat(spread) : null, kelly: kelly !== null ? parseFloat(kelly) : null }
 }
 
-function analyticsCard(rows) {
-  if (!rows || !rows.length) return ""
-  const lines = rows.map(r => {
+function analyticsCard(rows, timeLeft) {
+  if ((!rows || !rows.length) && !timeLeft) return ""
+  const lines = (rows || []).map(r => {
     const parts = []
     const beClass = "val-muted"
     parts.push(`<div class="info-row"><span class="info-key">${tip("BREAK-EVEN")}</span><span class="info-val ${beClass}">${r.breakEven}%</span></div>`)
@@ -114,14 +114,18 @@ function analyticsCard(rows) {
       const spClass = r.spread < 3 ? "val-green" : r.spread < 8 ? "val-amber" : "val-red"
       parts.push(`<div class="info-row"><span class="info-key">${tip("SPREAD QUALITY")}</span><span class="info-val ${spClass}">${r.spread}%</span></div>`)
     }
-    if (rows.length > 1) {
+    if ((rows || []).length > 1) {
       return `<div class="info-row" style="border-bottom:none;padding-bottom:4px"><span class="info-key" style="color:#d8d6cc;font-weight:600">${esc(r.label)}</span></div>` + parts.join("")
     }
     return parts.join("")
   }).join("")
+  const timeRow = timeLeft
+    ? `<div class="info-row"><span class="info-key">TIME REMAINING</span><span class="info-val urgency-text-${timeLeft.urgency}">⏱ ${esc(timeLeft.text)}</span></div>`
+    : ""
   return `
     <div class="mi-card">
       <div class="section-label">TRADER ANALYTICS</div>
+      ${timeRow}
       ${lines}
     </div>`
 }
@@ -328,7 +332,7 @@ function renderKalshiEvent(ev, accent) {
     }
     return calcAnalyticsRow(m.yes_sub_title || "YES", prob, ask, bid)
   }).filter(Boolean)
-  const analyticsHtml = analyticsCard(analyticsRows)
+  const analyticsHtml = analyticsCard(analyticsRows, timeLeft)
 
   return `
     <!-- Event header -->
@@ -450,7 +454,7 @@ function renderPolymarketEvent(event, markets, accent) {
   const polyAnalytics = polyAnalyticsCandidates.slice(0, 3).map(c =>
     calcAnalyticsRow(c.label, c.prob, c.ask, c.bid)
   ).filter(Boolean)
-  const analyticsHtml = analyticsCard(polyAnalytics)
+  const analyticsHtml = analyticsCard(polyAnalytics, timeLeft)
 
   return `
     <div class="mi-card">

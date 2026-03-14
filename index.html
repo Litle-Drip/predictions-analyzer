@@ -364,6 +364,10 @@
     .tip:hover::after,
     .tip:focus::after,
     .tip:active::after { opacity: 1; }
+    .tip-bottom::after {
+      bottom: auto;
+      top: calc(100% + 8px);
+    }
 
     /* ── Urgency banner ── */
     .urgency-banner {
@@ -378,6 +382,9 @@
     .urgency-low  { color: var(--muted); }
     .urgency-med  { color: #f59e0b; }
     .urgency-high { color: var(--red); }
+    .urgency-text-low  { color: var(--muted); }
+    .urgency-text-med  { color: #f59e0b; }
+    .urgency-text-high { color: var(--red); font-weight: 600; }
 
     /* ── Analytics value colors ── */
     .val-green { color: var(--green); }

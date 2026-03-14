@@ -399,8 +399,10 @@ function renderKalshiEvent(ev, accent) {
     }
   } else if (isMultiOutcome) {
     const eventName = (ev.title || ev.event_ticker || "this event").replace(/[?!.]+$/, "").trim()
-    const sampleOutcome = sorted[0]?.yes_sub_title || "an outcome"
-    betExplainerText = `Bet on which outcome will win — for example, "${sampleOutcome}." You win if your chosen outcome is correct.${ev.mutually_exclusive ? " Only one outcome can win — winner takes all." : ""}`
+    const sampleOutcome = (sorted[0]?.yes_sub_title || "").replace(/[.!?]+$/, "")
+    betExplainerText = sampleOutcome
+      ? `Bet on which outcome will happen for ${eventName} — for example, "${sampleOutcome}." You win if your chosen outcome is correct.${ev.mutually_exclusive ? " Only one outcome can win — winner takes all." : ""}`
+      : `Bet on which outcome will happen for ${eventName}. You win if your chosen outcome is correct.${ev.mutually_exclusive ? " Only one outcome can win — winner takes all." : ""}`
   }
 
   const timeLeft = fmtTimeRemaining(first.close_time)

@@ -115,10 +115,10 @@ function whatsTheBetCard(text) {
     </div>`
 }
 
-function betSimulatorHtml(pctYes, platform) {
+function betSimulatorHtml(pctYes) {
   if (!pctYes || pctYes <= 0 || pctYes >= 100) return ""
   const prob = pctYes / 100
-  const defaultBet = 10
+  const defaultBet = window._simMarket ? window._simMarket.amount : 10
   const winPayout = (defaultBet / prob).toFixed(2)
   const profit = (winPayout - defaultBet).toFixed(2)
   return `
@@ -416,8 +416,8 @@ function renderKalshiEvent(ev, accent) {
     leadPct = lp > 0 ? Math.round(lp * 100)
       : ya > 0 ? Math.round((yb + ya) / 2 * 100) : Math.round(yb * 100)
   }
-  window._simMarket = { amount: 10, pct: leadPct, platform: "kalshi" }
-  const betSimHtml = betSimulatorHtml(leadPct, "kalshi")
+  window._simMarket = { amount: window._simMarket?.amount || 10, pct: leadPct, platform: "kalshi" }
+  const betSimHtml = betSimulatorHtml(leadPct)
 
   const analyticsRows = (isMultiOutcome ? sorted.slice(0, 3) : sorted.slice(0, 1)).map(m => {
     const prob = parseFloat(m.last_price_dollars || 0)
@@ -596,8 +596,8 @@ function renderPolymarketEvent(event, markets, accent) {
     : ""
 
   const leadPctPoly = polyAnalyticsCandidates.length ? Math.round(polyAnalyticsCandidates[0].prob * 100) : 0
-  window._simMarket = { amount: 10, pct: leadPctPoly, platform: "polymarket" }
-  const betSimHtml = betSimulatorHtml(leadPctPoly, "polymarket")
+  window._simMarket = { amount: window._simMarket?.amount || 10, pct: leadPctPoly, platform: "polymarket" }
+  const betSimHtml = betSimulatorHtml(leadPctPoly)
 
   return `
     <div class="mi-card">

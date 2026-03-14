@@ -264,7 +264,7 @@ function outcomeRow(label, sub, pct, color, delta = null, extras = {}) {
 }
 
 // Paginated show-more: reveals PAGE_SIZE rows at a time
-const PAGE_SIZE = 10
+const PAGE_SIZE = 5
 window._outcomePages = {}
 
 function showMoreOutcomes(uid) {
@@ -457,13 +457,12 @@ function renderKalshiEvent(ev, accent) {
       ${outcomesHtml}
     </div>
 
-    ${betSimHtml}
-
-    ${ruleSentences.length ? `
-    <div class="mi-card">
-      <div class="section-label">HOW IT RESOLVES</div>
-      <div class="num-list">${numList(ruleSentences)}</div>
-    </div>` : ""}
+    <div class="stats-grid">
+      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
+      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : null)}
+      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
+      ${statCard("OPEN INTEREST", totalOI ? `$${totalOI}` : null)}
+    </div>
 
     ${timelineRows ? `
     <div class="mi-card">
@@ -471,14 +470,15 @@ function renderKalshiEvent(ev, accent) {
       ${timelineRows}
     </div>` : ""}
 
-    ${analyticsHtml}
+    ${ruleSentences.length ? `
+    <div class="mi-card">
+      <div class="section-label">HOW IT RESOLVES</div>
+      <div class="num-list">${numList(ruleSentences)}</div>
+    </div>` : ""}
 
-    <div class="stats-grid">
-      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
-      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : null)}
-      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
-      ${statCard("OPEN INTEREST", totalOI ? `$${totalOI}` : null)}
-    </div>
+    ${betSimHtml}
+
+    ${analyticsHtml}
   `
 }
 
@@ -616,14 +616,12 @@ function renderPolymarketEvent(event, markets, accent) {
       ${outcomesHtml}
     </div>
 
-    ${betSimHtml}
-
-    ${polyRulesLimited.length || resSourceHtml ? `
-    <div class="mi-card">
-      <div class="section-label">HOW IT RESOLVES</div>
-      ${polyRulesLimited.length ? `<div class="num-list">${numList(polyRulesLimited)}</div>` : ""}
-      ${resSourceHtml}
-    </div>` : ""}
+    <div class="stats-grid">
+      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
+      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : null)}
+      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
+      ${commentCount > 0 ? statCard("COMMENTS", commentCount.toLocaleString()) : ""}
+    </div>
 
     ${event.endDate ? `
     <div class="mi-card">
@@ -632,14 +630,16 @@ function renderPolymarketEvent(event, markets, accent) {
       ${infoRow("End date", fmtDate(event.endDate))}
     </div>` : ""}
 
-    ${analyticsHtml}
+    ${polyRulesLimited.length || resSourceHtml ? `
+    <div class="mi-card">
+      <div class="section-label">HOW IT RESOLVES</div>
+      ${polyRulesLimited.length ? `<div class="num-list">${numList(polyRulesLimited)}</div>` : ""}
+      ${resSourceHtml}
+    </div>` : ""}
 
-    <div class="stats-grid">
-      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
-      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : null)}
-      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
-      ${commentCount > 0 ? statCard("COMMENTS", commentCount.toLocaleString()) : ""}
-    </div>
+    ${betSimHtml}
+
+    ${analyticsHtml}
   `
 }
 

@@ -104,7 +104,6 @@ function plainEnglishRules(rulesText) {
       .replace(/\.$/, "")
     )
     .filter(s => s.length > 10)
-    .slice(0, 6)
 }
 
 function whatsTheBetCard(text) {
@@ -399,7 +398,9 @@ function renderKalshiEvent(ev, accent) {
       betExplainerText += " You lose if it doesn't happen."
     }
   } else if (isMultiOutcome) {
-    betExplainerText = `Pick which outcome you think will happen. You win if your chosen outcome is correct. ${ev.mutually_exclusive ? "Only one outcome can win — winner takes all." : ""}`
+    const eventName = (ev.title || ev.event_ticker || "this event").replace(/[?!.]+$/, "").trim()
+    const sampleOutcome = sorted[0]?.yes_sub_title || "an outcome"
+    betExplainerText = `Bet on which outcome will win — for example, "${sampleOutcome}." You win if your chosen outcome is correct.${ev.mutually_exclusive ? " Only one outcome can win — winner takes all." : ""}`
   }
 
   const timeLeft = fmtTimeRemaining(first.close_time)
@@ -577,7 +578,7 @@ function renderPolymarketEvent(event, markets, accent) {
       })
     })
   })
-  const polyRulesLimited = polyRuleSentences.slice(0, 6)
+  const polyRulesLimited = polyRuleSentences
   let resSource = ""
   for (const m of markets) {
     if (m.resolutionSource && typeof m.resolutionSource === "string") {

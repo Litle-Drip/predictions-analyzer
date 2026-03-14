@@ -398,7 +398,7 @@
   </div>
 
   <div class="search-row">
-    <input id="urlInput" placeholder="https://kalshi.com/markets/... or polymarket.com/event/..." />
+    <input id="urlInput" placeholder="https://kalshi.com/markets/... or polymarket.com/event/..." onkeydown="if(event.key==='Enter')analyze()" />
     <button onclick="analyze()">ANALYZE ↗</button>
   </div>
 

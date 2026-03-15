@@ -1,5 +1,5 @@
 const PLATFORMS = {
-  kalshi:     { label: "KALSHI",     accent: "#d94f20" },
+  kalshi:     { label: "KALSHI",     accent: "#00C805" },
   polymarket: { label: "POLYMARKET", accent: "#7B3FE4" },
   gemini:     { label: "GEMINI",     accent: "#00DCFA" },
   coinbase:   { label: "COINBASE",   accent: "#1652F0" },
@@ -25,6 +25,7 @@ const GLOSSARY = {
   "EXPECTED RESOLUTION": "When the market is expected to be settled and payouts distributed, based on the exchange's schedule.",
   "START DATE":       "When this market or event was created on the platform.",
   "END DATE":         "The scheduled end date for this event on the platform — trading may close before or after the real-world event.",
+  "PROJECTED PAYOUT": "If the current leader wins, how much each contract pays. Kalshi contracts always pay $1 on a win — profit depends on what you paid.",
 }
 
 function esc(str) {
@@ -51,19 +52,56 @@ function toMoneyline(pct) {
 
 function fmtDate(iso) {
   if (!iso || typeof iso !== "string" || iso.startsWith("0001")) return "—"
-  const d = new Date(iso)
+  // Date-only strings (YYYY-MM-DD) are parsed as UTC midnight by JS spec, which shifts them
+  // one day back in any negative-offset timezone (all of the Americas). Append local noon
+  // so the date renders correctly regardless of the user's timezone.
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + "T12:00:00" : iso
+  const d = new Date(normalized)
   if (isNaN(d)) return "—"
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+  return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })
 }
 
 function fmtDateTime(iso) {
   if (!iso || typeof iso !== "string" || iso.startsWith("0001")) return "—"
   const d = new Date(iso)
   if (isNaN(d)) return "—"
-  return d.toLocaleString("en-US", {
+  return d.toLocaleString(undefined, {
     month: "long", day: "numeric", year: "numeric",
     hour: "numeric", minute: "2-digit", timeZoneName: "short"
   })
+}
+
+function categoryColor(cat) {
+  const c = (cat || "").toLowerCase()
+  if (/politi|election|govern|democrat|republican|senate|congress|president/.test(c)) return "#3b82f6"
+  if (/sport|golf|pga|nfl|nba|mlb|nhl|soccer|tennis|football|basketball|baseball|hockey|ufc|fight/.test(c)) return "#22c55e"
+  if (/financ|econom|gdp|inflation|fed|rate|stock|market|bond|yield/.test(c)) return "#f59e0b"
+  if (/crypto|bitcoin|btc|ethereum|eth|web3|token|coin/.test(c)) return "#6366f1"
+  if (/tech|science|space|ai|software|computer/.test(c)) return "#06b6d4"
+  if (/entertain|culture|celebrity|award|movie|music|tv|film|oscar|grammy/.test(c)) return "#a855f7"
+  if (/health|medical|covid|drug|pharma|disease/.test(c)) return "#ec4899"
+  if (/business|company|corporate|ceo|merger|ipo/.test(c)) return "#f97316"
+  return "#6b7280"
+}
+
+// Shared outcome color palette used by both Kalshi and Polymarket renderers
+const OUTCOME_COLORS = ["#22c55e", "#60a5fa", "#f59e0b", "#a78bfa", "#34d399", "#fb923c", "#38bdf8", "#f472b6"]
+
+// volume_fp unit detection: Kalshi event-level fp fields can be in cents (very large, >1e8) or dollars.
+// Market-level m.volume_fp is consistently cents — callers divide by 100 directly.
+function parseEventFP(val) {
+  const n = parseFloat(val || 0)
+  return n > 1e8 ? n / 100 : n
+}
+
+// Shared resolve-text cleaner used in both plainEnglishRules and betExplainer derivation
+function applyResolveText(text) {
+  return text
+    .replace(/the market (?:will )?resolve[sd]? (?:to )?"?Yes"?\.?/gi, "you win")
+    .replace(/the market (?:will )?resolve[sd]? (?:to )?"?No\.?"?\.?/gi, "you lose")
+    .replace(/this market (?:will )?resolve[sd]? (?:to )?"?Yes"?\.?/gi, "you win")
+    .replace(/this market (?:will )?resolve[sd]? (?:to )?"?No\.?"?\.?/gi, "you lose")
+    .replace(/the market (?:will )?resolve[sd]? 50-50/gi, "your bet is returned (50-50 split)")
 }
 
 function fmtNum(val) {
@@ -97,12 +135,7 @@ function plainEnglishRules(rulesText) {
     .filter(s => !s.toLowerCase().startsWith("kalshi is not affiliated"))
     .filter(s => !s.toLowerCase().startsWith("kalshi reserves"))
     .filter(s => !s.toLowerCase().includes("for more information"))
-    .map(s => s
-      .replace(/the market (?:will )?resolve[sd]? (?:to )?"?Yes"?\.?/gi, "you win")
-      .replace(/the market (?:will )?resolve[sd]? (?:to )?"?No\.?"?\.?/gi, "you lose")
-      .replace(/this market (?:will )?resolve[sd]? (?:to )?"?Yes"?\.?/gi, "you win")
-      .replace(/this market (?:will )?resolve[sd]? (?:to )?"?No\.?"?\.?/gi, "you lose")
-      .replace(/the market (?:will )?resolve[sd]? 50-50/gi, "your bet is returned (50-50 split)")
+    .map(s => applyResolveText(s)
       .replace(/^If /i, "If ")
       .replace(/^The following market refers to /i, "This bet is about ")
       .replace(/,\s*then you win\.?$/i, ", you win.")
@@ -168,25 +201,26 @@ function updateBetSim() {
 function calcAnalyticsRow(label, prob, ask, bid) {
   if (!Number.isFinite(prob) || prob <= 0 || prob >= 1) return null
   if (!Number.isFinite(ask) || ask <= 0 || ask >= 1) return null
-  const breakEven = (ask * 100).toFixed(1)
-  const ev = ((prob - ask) / ask * 100).toFixed(1)
+  const round1 = n => Math.round(n * 10) / 10
+  const breakEven = round1(ask * 100)
+  const ev = round1((prob - ask) / ask * 100)
   const mid = Number.isFinite(bid) ? (bid + ask) / 2 : ask
-  const spread = mid > 0 && Number.isFinite(bid) ? ((ask - bid) / mid * 100).toFixed(1) : null
+  const spread = mid > 0 && Number.isFinite(bid) ? round1((ask - bid) / mid * 100) : null
   let kelly = null
   const b = (1 - ask) / ask
   if (b > 0) {
     const k = (prob * b - (1 - prob)) / b
-    kelly = Math.min(Math.max(k * 100, 0), 25).toFixed(1)
+    kelly = Math.min(Math.max(round1(k * 100), 0), 25)
   }
-  return { label, breakEven, ev: parseFloat(ev), spread: spread !== null ? parseFloat(spread) : null, kelly: kelly !== null ? parseFloat(kelly) : null }
+  return { label, breakEven, ev, spread, kelly }
 }
 
 function analyticsCard(rows, timeLeft) {
   if ((!rows || !rows.length) && !timeLeft) return ""
-  const lines = (rows || []).map(r => {
+  const multiRow = rows.length > 1
+  const lines = rows.map(r => {
     const parts = []
-    const beClass = "val-muted"
-    parts.push(`<div class="info-row"><span class="info-key">${tip("BREAK-EVEN")}</span><span class="info-val ${beClass}">${r.breakEven}%</span></div>`)
+    parts.push(`<div class="info-row"><span class="info-key">${tip("BREAK-EVEN")}</span><span class="info-val val-muted">${r.breakEven}%</span></div>`)
     const evClass = r.ev > 0 ? "val-green" : r.ev < 0 ? "val-red" : "val-muted"
     parts.push(`<div class="info-row"><span class="info-key">${tip("EXPECTED VALUE")}</span><span class="info-val ${evClass}">${r.ev > 0 ? "+" : ""}${r.ev}%</span></div>`)
     if (r.kelly !== null) {
@@ -196,7 +230,7 @@ function analyticsCard(rows, timeLeft) {
       const spClass = r.spread < 3 ? "val-green" : r.spread < 8 ? "val-amber" : "val-red"
       parts.push(`<div class="info-row"><span class="info-key">${tip("SPREAD QUALITY")}</span><span class="info-val ${spClass}">${r.spread}%</span></div>`)
     }
-    if ((rows || []).length > 1) {
+    if (multiRow) {
       return `<div class="info-row" style="border-bottom:none;padding-bottom:4px"><span class="info-key" style="color:#d8d6cc;font-weight:600">${esc(r.label)}</span></div>` + parts.join("")
     }
     return parts.join("")
@@ -212,9 +246,9 @@ function analyticsCard(rows, timeLeft) {
     </div>`
 }
 
-function statCard(label, value) {
+function statCard(label, value, sub = "") {
   const inner = value
-    ? `<div class="stat-value">${value}</div>`
+    ? `<div class="stat-value">${value}</div>${sub ? `<div class="stat-sub">${esc(sub)}</div>` : ""}`
     : `<div class="stat-dash"></div>`
   return `<div class="stat-card"><div class="stat-label">${tip(label)}</div>${inner}</div>`
 }
@@ -228,7 +262,7 @@ function infoRow(key, val) {
 function numList(sentences) {
   return sentences.map((s, i) => `
     <div class="num-row">
-      <span class="num-idx">0${i + 1}</span>
+      <span class="num-idx">${String(i + 1).padStart(2, "0")}</span>
       <span class="num-text">${s}</span>
     </div>`).join("")
 }
@@ -269,7 +303,7 @@ function outcomeRow(label, sub, pct, color, delta = null, extras = {}) {
 }
 
 // Paginated show-more: reveals PAGE_SIZE rows at a time
-const PAGE_SIZE = 10
+const PAGE_SIZE = 5
 window._outcomePages = {}
 
 function showMoreOutcomes(uid) {
@@ -302,7 +336,8 @@ function buildOutcomesHtml(rows) {
 }
 
 function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
-  const markets = (ev.markets || []).filter(m => m.yes_sub_title)
+  const markets    = (ev.markets || []).filter(m => m.yes_sub_title)
+  const allMarkets = (ev._allMarkets || ev.markets || []).filter(m => m.yes_sub_title)
   if (!markets.length) return `<div class="mi-error">No outcome data available for this market.</div>`
   const first = markets[0] || {}
 
@@ -316,12 +351,17 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
   const statusText = status.toUpperCase()
   const category   = ev.product_metadata?.competition || ev.category || "Markets"
 
+  const catColor = categoryColor(category)
+
   // Clean event title — strip trailing punctuation (?, !, .)
   const eventTitle = (ev.title || ev.event_ticker || "").replace(/[?!.]+$/, "").trim()
   const eventSubTitle = ev.sub_title || ""
 
-  // Resolution — find the winning market (result === "yes") or any resolved market
-  const resolvedMarket = sorted.find(m => m.result === "yes") || sorted.find(m => m.result)
+  // Resolution — show banner only when winner found (yes), or market is closed/finalized with a no result
+  // In multi-outcome markets, individual outcomes get result:"no" while the market is still live — ignore those
+  const isFinished = status === "finalized" || status === "closed"
+  const resolvedMarket = sorted.find(m => m.result === "yes") ||
+    (isFinished ? sorted.find(m => m.result === "no") : null)
   const resolution  = resolvedMarket?.result || ""
   const expValue    = resolvedMarket?.expiration_value || first.expiration_value || ""
   const resolvedBanner = resolution
@@ -331,7 +371,6 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
   const isMultiOutcome = markets.length > 2
 
   // Outcomes — paginated via buildOutcomesHtml
-  const colors = ["#22c55e", "#60a5fa", "#f59e0b", "#a78bfa", "#34d399", "#fb923c", "#38bdf8", "#f472b6"]
   const allRows = sorted.map((m, i) => {
     const lastPrice = parseFloat(m.last_price_dollars || 0)
     const yesBid    = parseFloat(m.yes_bid_dollars || 0)
@@ -356,26 +395,43 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
       if (mVol > 0) extras.vol = Math.round(mVol).toLocaleString()
       if (mOI > 0)  extras.oi  = Math.round(mOI).toLocaleString()
     }
-    return outcomeRow(label, sub, pct, colors[i % colors.length], delta, extras)
+    return outcomeRow(label, sub, pct, OUTCOME_COLORS[i % OUTCOME_COLORS.length], delta, extras)
   })
   const outcomesHtml = buildOutcomesHtml(allRows)
 
-  // Aggregate stats — volume_fp and open_interest_fp are in cents, convert to dollars
-  const totalVol   = fmtNum(markets.reduce((s, m) => s + parseFloat(m.volume_fp || 0), 0) / 100)
-  const totalVol24 = fmtNum(markets.reduce((s, m) => {
-    // volume_24h_fp is cents; volume_24h (if present) is already dollars
-    if (m.volume_24h_fp) return s + parseFloat(m.volume_24h_fp) / 100
-    return s + parseFloat(m.volume_24h || 0)
+  // Aggregate stats — always use allMarkets (full event) not filtered display markets
+  // parseEventFP handles event-level fp inconsistency (see module-scope definition above)
+  const totalVol   = fmtNum(ev.volume_fp != null
+    ? parseEventFP(ev.volume_fp)
+    : allMarkets.reduce((s, m) => s + parseFloat(m.volume_fp || 0), 0) / 100)
+  const totalVol24 = fmtNum(ev.volume_24h_fp != null
+    ? parseEventFP(ev.volume_24h_fp)
+    : allMarkets.reduce((s, m) => {
+        if (m.volume_24h_fp) return s + parseFloat(m.volume_24h_fp) / 100
+        return s + parseFloat(m.volume_24h || 0)
+      }, 0))
+  // FIX: liquidity field name is unconfirmed — Kalshi may return liquidity_dollars, liquidity_fp (cents),
+  // or liquidity (cents). Trying all known variants; if all are 0 the card will be blank.
+  const totalLiq   = fmtNum(allMarkets.reduce((s, m) => {
+    if (m.liquidity_dollars != null) return s + parseFloat(m.liquidity_dollars)
+    if (m.liquidity_fp      != null) return s + parseFloat(m.liquidity_fp) / 100
+    if (m.liquidity         != null) return s + parseFloat(m.liquidity) / 100
+    return s
   }, 0))
-  const totalLiq   = fmtNum(markets.reduce((s, m) => s + parseFloat(m.liquidity_dollars || 0), 0))
-  const totalOI    = fmtNum(markets.reduce((s, m) => s + parseFloat(m.open_interest_fp || 0), 0) / 100)
+  const totalOI    = fmtNum(allMarkets.reduce((s, m) => s + parseFloat(m.open_interest_fp || 0), 0) / 100)
 
-  // Timeline
-  const startDate     = fmtDate(first.open_time)
+  // Timeline — use event-level open_time; fall back to earliest market open_time across all markets
+  const eventOpenTime = ev.open_time ||
+    allMarkets.reduce((earliest, m) => {
+      if (!m.open_time) return earliest
+      return !earliest || m.open_time < earliest ? m.open_time : earliest
+    }, null)
+  const startDate     = fmtDate(eventOpenTime)
   const endDate       = fmtDateTime(first.close_time)
   const expDate       = fmtDateTime(first.expected_expiration_time)
   const canCloseEarly = first.can_close_early
   const earlyCloseText = first.early_close_condition || (canCloseEarly ? "Possible" : "")
+
   const timelineRows  = [
     infoRow("Trading opens", startDate),
     infoRow("Betting closes", endDate),
@@ -390,7 +446,12 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
     ? `<span class="tag-exclusive">WINNER TAKES ALL</span>` : ""
 
   let betExplainerText = ""
-  if (!isMultiOutcome && first.rules_primary) {
+  if (!isMultiOutcome && markets.length === 2) {
+    // Two-sided matchup (e.g. team A vs team B) — explain both options clearly
+    const labelA = sorted[0]?.yes_sub_title || "one outcome"
+    const labelB = sorted[1]?.yes_sub_title || "the other outcome"
+    betExplainerText = `Pick a side: bet YES on ${labelA} if you think they win, or YES on ${labelB} if you think they win. Each contract pays $1 — only one side can resolve YES.`
+  } else if (!isMultiOutcome && first.rules_primary) {
     betExplainerText = first.rules_primary
       .split(/[.!?]\s/)[0]
       .replace(/^If /i, "You win if ")
@@ -429,9 +490,11 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
   const betSimHtml = betSimulatorHtml(leadPct)
 
   const analyticsRows = (isMultiOutcome ? sorted.slice(0, 3) : sorted.slice(0, 1)).map(m => {
-    const prob = parseFloat(m.last_price_dollars || 0)
-    let ask  = parseFloat(m.yes_ask_dollars || 0)
-    const bid  = parseFloat(m.yes_bid_dollars || 0)
+    const lp  = parseFloat(m.last_price_dollars || 0)
+    const bid = parseFloat(m.yes_bid_dollars || 0)
+    let ask   = parseFloat(m.yes_ask_dollars || 0)
+    // Match the same fallback chain used for outcome probability display
+    const prob = lp > 0 ? lp : (ask > 0 ? (bid + ask) / 2 : bid)
     if (!Number.isFinite(ask) || ask <= 0) {
       ask = Number.isFinite(bid) && bid > 0 ? (bid + prob) / 2 : prob
     }
@@ -444,7 +507,7 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
       <div class="event-head">
         <div class="event-tags">
           <span class="tag-platform" style="background:${accent}">${esc((PLATFORMS[platformKey] || PLATFORMS.kalshi).label)}</span>
-          <span class="tag-cat">${esc(category.toUpperCase())}</span>
+          <span class="tag-cat" style="color:${catColor};border-color:${catColor};background:${catColor}1a">${esc(category.toUpperCase())}</span>
           ${exclusiveTag}
           <span class="tag-status">
             <span class="${statusDot}">●</span> ${esc(statusText)}
@@ -458,26 +521,16 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
 
     ${whatsTheBetCard(betExplainerText)}
 
-    <div class="mi-card">
-      <div class="section-label">OUTCOMES &amp; PROBABILITY</div>
-      ${outcomesHtml}
-    </div>
-
-    ${betSimHtml}
-
-    ${ruleSentences.length ? `
-    <div class="mi-card">
-      <div class="section-label">HOW IT RESOLVES</div>
-      <div class="num-list">${numList(ruleSentences)}</div>
-    </div>` : ""}
-
     ${timelineRows ? `
     <div class="mi-card">
       <div class="section-label">TIMELINE</div>
       ${timelineRows}
     </div>` : ""}
 
-    ${analyticsHtml}
+    <div class="mi-card">
+      <div class="section-label">OUTCOMES &amp; PROBABILITY</div>
+      ${outcomesHtml}
+    </div>
 
     <div class="stats-grid">
       ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : "—")}
@@ -485,6 +538,245 @@ function renderKalshiEvent(ev, accent, platformKey = "kalshi") {
       ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : "—")}
       ${statCard("OPEN INTEREST", totalOI ? `$${totalOI}` : "—")}
     </div>
+
+    ${ruleSentences.length ? `
+    <div class="mi-card">
+      <div class="section-label">HOW IT RESOLVES</div>
+      <div class="num-list">${numList(ruleSentences)}</div>
+    </div>` : ""}
+
+    ${betSimHtml}
+
+    ${analyticsHtml}
+  `
+}
+
+function renderGeminiEvent(event, accent) {
+  const status = (event.status || "").toLowerCase()
+  const isOpen = status === "active" || status === "approved" || status === "open"
+  const statusDot  = isOpen ? "dot-green" : "dot-red"
+  const statusText = isOpen ? "OPEN" : status.toUpperCase() || "CLOSED"
+
+  const contracts = Array.isArray(event.contracts) ? event.contracts : []
+  const isBinary = event.type === "binary"
+
+  // Build outcome rows from contracts
+  const allRows = []
+  const analyticsCandidates = []
+
+  if (isBinary && contracts.length === 1) {
+    // Binary: show YES and NO from a single contract price
+    const c = contracts[0]
+    const cp    = c.prices || {}
+    const price = parseFloat(cp.lastTradePrice || cp.bestAsk || cp.bestBid || c.lastPrice || c.price || c.bestAsk || 0)
+    const bid   = parseFloat(cp.bestBid || c.bestBid || c.bid || price)
+    const ask   = parseFloat(cp.bestAsk || c.bestAsk || c.ask || price)
+    const pctYes = Math.round(price * 100)
+    const pctNo  = 100 - pctYes
+    const extras = Number.isFinite(bid) && Number.isFinite(ask) && ask > 0
+      ? { bid, ask }
+      : {}
+    allRows.push(outcomeRow("YES", "", pctYes, OUTCOME_COLORS[0], null, extras))
+    allRows.push(outcomeRow("NO",  "", pctNo,  OUTCOME_COLORS[1], null, {}))
+    if (ask > 0) analyticsCandidates.push({ prob: price, label: "YES", ask, bid: bid || price })
+  } else {
+    contracts.forEach((c, idx) => {
+      // Prefer instrumentSymbol over name — symbols are uppercase and fully qualified,
+      // whereas c.name is often a lowercase slug like "2603151930-pur-mich-m-mich"
+      const rawName = [c.title, c.description, c.instrumentSymbol, c.name]
+        .find(v => typeof v === "string" && v.trim()) || `Outcome ${idx + 1}`
+      // If the value contains dashes (slug/symbol), extract the last meaningful segment:
+      // "NCAAM-2603151930-PUR-MICH-M-MICH" → "Mich"
+      // "2603151930-pur-mich-m-mich" → "Mich"
+      // "GEMI-TPC2026WIN-ABERG" → "Aberg"
+      let name = rawName
+      if (rawName.includes("-")) {
+        const parts = rawName.split("-")
+        // Filter out pure-numeric segments and single-char segments (like the trailing "M" in sports tickers)
+        const meaningful = parts.filter(p => p.length > 1 && !/^\d+$/.test(p))
+        const lastPart = meaningful[meaningful.length - 1] || parts[parts.length - 1]
+        if (lastPart) {
+          name = lastPart.charAt(0).toUpperCase() + lastPart.slice(1).toLowerCase()
+        }
+      }
+      // Gemini nests prices under c.prices.{lastTradePrice,bestBid,bestAsk}
+      const cp    = c.prices || {}
+      const price = parseFloat(cp.lastTradePrice || cp.bestAsk || cp.bestBid || c.lastPrice || c.midpoint || c.mid || c.price || c.bestAsk || 0)
+      const bid   = parseFloat(cp.bestBid || c.bestBid || c.bid || price)
+      const ask   = parseFloat(cp.bestAsk || c.bestAsk || c.ask || price)
+      const pct   = Math.round(price * 100)
+      const extras = {}
+      if (Number.isFinite(bid) && Number.isFinite(ask) && ask > 0) {
+        extras.bid = bid
+        extras.ask = ask
+      }
+      if (c.volume || c.notionalVolume) extras.vol = fmtNum(parseFloat(c.volume || c.notionalVolume))
+      if (c.openInterest) extras.oi = fmtNum(parseFloat(c.openInterest))
+      allRows.push(outcomeRow(name, "", pct, OUTCOME_COLORS[idx % OUTCOME_COLORS.length], null, extras))
+      if (price > 0 && ask > 0) {
+        analyticsCandidates.push({ prob: price, label: String(name), ask, bid: bid || price })
+      }
+    })
+  }
+
+  if (!allRows.length) return `<div class="mi-error">No outcome data found for this event.</div>`
+  const outcomesHtml = buildOutcomesHtml(allRows)
+
+  // Stats — fall back to contract-level aggregation when event-level fields are missing
+  const contractLiq = contracts.reduce((s, c) => s + parseFloat(c.liquidity || c.notionalLiquidity || 0), 0)
+  const totalVol = fmtNum(parseFloat(event.volume || event.notionalVolume || 0))
+  const totalLiq = fmtNum(parseFloat(event.liquidity || contractLiq || 0))
+  const totalOI  = fmtNum(parseFloat(event.openInterest || 0))
+
+  // Tags
+  let tags = event.tags || []
+  if (!Array.isArray(tags)) tags = []
+  const cat = event.category || ""
+  if (cat && !tags.includes(cat)) tags = [cat, ...tags]
+  const tagsHtml = tags
+    .filter(t => t != null)
+    .map(t => {
+      const col = categoryColor(String(t))
+      return `<span class="tag-cat" style="color:${col};border-color:${col};background:${col}1a">${esc(String(t).toUpperCase())}</span>`
+    }).join("")
+
+  // Urgency — pull close date from event, then fall back to first contract's close date
+  const contractCloseDate = contracts.length > 0
+    ? (contracts[0].closeDate || contracts[0].expiryDate || contracts[0].endDate || "")
+    : ""
+  const expiryIso = event.closeDate || event.expiryDate || event.endDate || contractCloseDate || event.resolvedAt || ""
+  const startIso  = event.openDate || event.startDate || event.effectiveDate || event.createdAt || ""
+  const timeLeft = fmtTimeRemaining(expiryIso)
+  const urgencyHtml = timeLeft
+    ? `<div class="urgency-banner urgency-${timeLeft.urgency}">⏱ ${esc(timeLeft.text)}</div>`
+    : ""
+
+  // Analytics
+  analyticsCandidates.sort((a, b) => b.prob - a.prob)
+  const analyticsRows = analyticsCandidates.slice(0, 3)
+    .map(c => calcAnalyticsRow(c.label, c.prob, c.ask, c.bid))
+    .filter(Boolean)
+  const analyticsHtml = analyticsCard(analyticsRows, timeLeft)
+
+  // Bet explainer from description
+  const desc = event.description || ""
+  // Build human-readable outcome names list for explainer (reuse the same name-extraction logic)
+  const contractNames = contracts.map(c => {
+    const raw = [c.title, c.description, c.instrumentSymbol, c.name]
+      .find(v => typeof v === "string" && v.trim()) || ""
+    if (!raw.includes("-")) return raw
+    const parts = raw.split("-")
+    const meaningful = parts.filter(p => p.length > 1 && !/^\d+$/.test(p))
+    const last = meaningful[meaningful.length - 1] || parts[parts.length - 1]
+    return last ? last.charAt(0).toUpperCase() + last.slice(1).toLowerCase() : raw
+  }).filter(Boolean)
+
+  let betExplainerText = ""
+  if (desc) {
+    betExplainerText = applyResolveText(desc)
+      .split(/(?<=[.!?])\s+/)
+      .filter(s => s.trim().length > 10)
+      .slice(0, 3)
+      .join(" ")
+  }
+
+  // Resolution rules — auto-generate if description provides no rules
+  const ruleSentences = desc ? plainEnglishRules(desc).slice(0, 8) : []
+  const isHeadToHead = !isBinary && contracts.length === 2
+  if (ruleSentences.length === 0) {
+    if (isBinary) {
+      const title = event.title || "this event"
+      ruleSentences.push(
+        `YES or NO market: will ${title} happen?`,
+        `If it does, the YES contract resolves to $1 — you collect $1 per contract held`,
+        `If it does not, the YES contract expires at $0 and NO pays out instead`,
+        `Only one side wins — hold the right contract to collect $1`
+      )
+      if (!betExplainerText) {
+        betExplainerText = `Bet YES if you think it happens, NO if you think it doesn't. Winning contract pays $1.`
+      }
+    } else if (isHeadToHead && contractNames.length === 2) {
+      const [a, b] = contractNames
+      ruleSentences.push(
+        `Pick which side wins: ${a} or ${b}`,
+        `If ${a} wins, the "${a}" contract resolves YES and pays $1`,
+        `If ${b} wins, the "${b}" contract resolves YES and pays $1`,
+        `The losing side's contract resolves NO and expires worthless`
+      )
+      if (!betExplainerText) {
+        betExplainerText = `Bet on the winner: ${a} or ${b}. Each contract pays $1 if your side wins. Only one side can win — the other expires at $0.`
+      }
+    } else if (!isBinary && contracts.length > 2 && contractNames.length > 0) {
+      const listed = contractNames.slice(0, 3).join(", ")
+      const more = contractNames.length > 3 ? `, and ${contractNames.length - 3} more` : ""
+      ruleSentences.push(
+        `Pick one outcome from ${contracts.length} options: ${listed}${more}`,
+        `The contract matching the actual result resolves YES and pays $1`,
+        `All other contracts resolve NO and expire worthless`,
+        `Only one outcome can win`
+      )
+      if (!betExplainerText) {
+        betExplainerText = `Pick the winning outcome from ${contracts.length} choices. The correct contract pays $1; all others expire at $0.`
+      }
+    }
+  }
+  // Append closing date to rules when we have a known expiry
+  if (ruleSentences.length > 0 && expiryIso) {
+    ruleSentences.push(`Trading closes ${fmtDate(expiryIso)}`)
+  }
+
+  // Bet sim
+  const leadPct = analyticsCandidates.length ? Math.round(analyticsCandidates[0].prob * 100) : 0
+  window._simMarket = { amount: window._simMarket?.amount || 10, pct: leadPct, platform: "gemini" }
+  const betSimHtml = betSimulatorHtml(leadPct)
+
+  return `
+    <div class="mi-card">
+      <div class="event-head">
+        <div class="event-tags">
+          <span class="tag-platform" style="background:${accent}">${esc(PLATFORMS.gemini.label)}</span>
+          ${tagsHtml}
+          <span class="tag-status"><span class="${statusDot}">●</span> ${esc(statusText)}</span>
+        </div>
+        <div class="event-title">${esc(event.title || "Gemini Prediction Market")}</div>
+        ${urgencyHtml}
+      </div>
+    </div>
+
+    ${whatsTheBetCard(betExplainerText)}
+
+    ${(startIso || expiryIso) ? `
+    <div class="mi-card">
+      <div class="section-label">TIMELINE</div>
+      ${infoRow("Start date", fmtDate(startIso))}
+      ${infoRow("End date", fmtDate(expiryIso))}
+      ${event.resolvedAt ? infoRow("Resolved", fmtDateTime(event.resolvedAt)) : ""}
+    </div>` : ""}
+
+    <div class="mi-card">
+      <div class="section-label">OUTCOMES &amp; PROBABILITY</div>
+      ${outcomesHtml}
+    </div>
+
+    <div class="stats-grid">
+      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
+      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
+      ${statCard("OPEN INTEREST", totalOI ? `$${totalOI}` : null)}
+      ${statCard("RUNNERS", contracts.length > 0 ? String(contracts.length) : null,
+          contractNames.length > 0
+            ? contractNames.slice(0, 5).join(" · ") + (contractNames.length > 5 ? " ···" : "")
+            : "")}
+    </div>
+
+    ${ruleSentences.length ? `
+    <div class="mi-card">
+      <div class="section-label">HOW IT RESOLVES</div>
+      <div class="num-list">${numList(ruleSentences)}</div>
+    </div>` : ""}
+
+    ${betSimHtml}
+
+    ${analyticsHtml}
   `
 }
 
@@ -492,9 +784,10 @@ function renderPolymarketEvent(event, markets, accent, platformKey = "polymarket
   const statusDot  = event.closed ? "dot-red" : "dot-green"
   const statusText = event.closed ? "CLOSED" : "OPEN"
 
-  const colors = ["#22c55e", "#60a5fa", "#f59e0b", "#a78bfa", "#34d399", "#fb923c", "#38bdf8", "#f472b6"]
   const allPolyRows = []
-  markets.forEach((market, idx) => {
+  const polyAnalyticsCandidates = []
+  let colorIdx = 0
+  markets.forEach((market) => {
     let outcomes, prices
     try {
       outcomes = typeof market.outcomes === "string" ? JSON.parse(market.outcomes) : market.outcomes
@@ -502,14 +795,34 @@ function renderPolymarketEvent(event, markets, accent, platformKey = "polymarket
     } catch (e) {
       return
     }
-    ;(outcomes || []).forEach((name, i) => {
-      const pct = Math.round(parseFloat(prices ? prices[i] : 0) * 100)
+    if (!Array.isArray(outcomes) || !Array.isArray(prices)) return
+    const rawAsk = parseFloat(market.bestAsk)
+    const rawBid = parseFloat(market.bestBid)
+    const bestAsk = Number.isFinite(rawAsk) && rawAsk > 0 ? rawAsk : null
+    const bestBid = Number.isFinite(rawBid) && rawBid > 0 ? rawBid : null
+    outcomes.forEach((name, i) => {
+      if (i >= prices.length) return
+      const pct = Math.round(parseFloat(prices[i] || 0) * 100)
       const extras = {}
-      if (market.bestBid != null && market.bestAsk != null) {
-        extras.bid = parseFloat(market.bestBid)
-        extras.ask = parseFloat(market.bestAsk)
+      // bestBid/bestAsk from Polymarket API refer to the YES token (i=0).
+      // For NO (i>0), invert: NO ask = 1 - YES bid, NO bid = 1 - YES ask.
+      if (bestBid != null && bestAsk != null) {
+        if (i === 0) {
+          extras.bid = bestBid
+          extras.ask = bestAsk
+        } else {
+          extras.bid = Math.max(0, 1 - bestAsk)
+          extras.ask = Math.min(1, 1 - bestBid)
+        }
       }
-      allPolyRows.push(outcomeRow(name, "", pct, colors[(idx + i) % colors.length], null, extras))
+      allPolyRows.push(outcomeRow(name, "", pct, OUTCOME_COLORS[colorIdx % OUTCOME_COLORS.length], null, extras))
+      colorIdx++
+
+      const prob = parseFloat(prices[i])
+      if (!Number.isFinite(prob) || prob <= 0) return
+      const ask = extras.ask != null ? extras.ask : prob
+      const bid = extras.bid != null ? extras.bid : prob
+      polyAnalyticsCandidates.push({ prob, label: name ? String(name) : market.question || "YES", ask, bid })
     })
   })
   if (!allPolyRows.length) return `<div class="mi-error">No outcome data found for this market.</div>`
@@ -526,32 +839,16 @@ function renderPolymarketEvent(event, markets, accent, platformKey = "polymarket
   if (!Array.isArray(tags)) tags = []
   const tagsHtml = tags
     .filter(t => t != null)
-    .map(t => `<span class="tag-topic">${esc(String(t).toUpperCase())}</span>`).join("")
+    .map(t => {
+      const col = categoryColor(String(t))
+      return `<span class="tag-cat" style="color:${col};border-color:${col};background:${col}1a">${esc(String(t).toUpperCase())}</span>`
+    }).join("")
 
   const timeLeft = fmtTimeRemaining(event.endDate)
   const urgencyHtml = timeLeft
     ? `<div class="urgency-banner urgency-${timeLeft.urgency}">⏱ ${esc(timeLeft.text)}</div>`
     : ""
 
-  const polyAnalyticsCandidates = []
-  markets.forEach(m => {
-    let prices
-    try { prices = typeof m.outcomePrices === "string" ? JSON.parse(m.outcomePrices) : m.outcomePrices } catch(e) { return }
-    let outcomes
-    try { outcomes = typeof m.outcomes === "string" ? JSON.parse(m.outcomes) : m.outcomes } catch(e) { return }
-    if (!prices || !Array.isArray(prices)) return
-    const bestAsk = Number.isFinite(parseFloat(m.bestAsk)) ? parseFloat(m.bestAsk) : null
-    const bestBid = Number.isFinite(parseFloat(m.bestBid)) ? parseFloat(m.bestBid) : null
-    prices.forEach((p, i) => {
-      const prob = parseFloat(p)
-      if (!Number.isFinite(prob) || prob <= 0) return
-      let ask = bestAsk != null ? bestAsk : prob
-      if (ask <= 0) ask = prob
-      const bid = bestBid != null ? bestBid : prob
-      const label = outcomes && outcomes[i] ? String(outcomes[i]) : m.question || "YES"
-      polyAnalyticsCandidates.push({ prob, label, ask, bid })
-    })
-  })
   polyAnalyticsCandidates.sort((a, b) => b.prob - a.prob)
   const polyAnalytics = polyAnalyticsCandidates.slice(0, 3).map(c =>
     calcAnalyticsRow(c.label, c.prob, c.ask, c.bid)
@@ -561,10 +858,7 @@ function renderPolymarketEvent(event, markets, accent, platformKey = "polymarket
   let betExplainerText = ""
   const firstDesc = first.description || first.question || event.description || ""
   if (firstDesc) {
-    betExplainerText = firstDesc
-      .replace(/the market (?:will )?resolve[sd]? (?:to )?"?Yes"?\.?/gi, "you win")
-      .replace(/the market (?:will )?resolve[sd]? (?:to )?"?No\.?"?\.?/gi, "you lose")
-      .replace(/the market (?:will )?resolve[sd]? 50-50/gi, "your bet is returned (50-50 split)")
+    betExplainerText = applyResolveText(firstDesc)
       .split(/(?<=[.!?])\s+/)
       .filter(s => s.trim().length > 10)
       .slice(0, 3)
@@ -578,19 +872,23 @@ function renderPolymarketEvent(event, markets, accent, platformKey = "polymarket
   }
 
   const polyRuleSentences = []
-  const seen = new Set()
+  const seenTexts = new Set()
+  const seenSentences = new Set()
   markets.forEach(m => {
     const desc = m.description || ""
     const q = m.question || ""
     ;[desc, q].forEach(text => {
-      if (!text || seen.has(text)) return
-      seen.add(text)
+      if (!text || seenTexts.has(text)) return
+      seenTexts.add(text)
       plainEnglishRules(text).forEach(s => {
-        if (!polyRuleSentences.includes(s)) polyRuleSentences.push(s)
+        if (!seenSentences.has(s)) {
+          seenSentences.add(s)
+          polyRuleSentences.push(s)
+        }
       })
     })
   })
-  const polyRulesLimited = polyRuleSentences
+  const polyRulesLimited = polyRuleSentences.slice(0, 8)
   let resSource = ""
   for (const m of markets) {
     if (m.resolutionSource && typeof m.resolutionSource === "string") {
@@ -626,12 +924,24 @@ function renderPolymarketEvent(event, markets, accent, platformKey = "polymarket
 
     ${whatsTheBetCard(betExplainerText)}
 
+    ${event.endDate ? `
+    <div class="mi-card">
+      <div class="section-label">TIMELINE</div>
+      ${infoRow("Start date", fmtDate(event.startDate))}
+      ${infoRow("End date", fmtDate(event.endDate))}
+    </div>` : ""}
+
     <div class="mi-card">
       <div class="section-label">OUTCOMES &amp; PROBABILITY</div>
       ${outcomesHtml}
     </div>
 
-    ${betSimHtml}
+    <div class="stats-grid">
+      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
+      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : null)}
+      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
+      ${commentCount > 0 ? statCard("COMMENTS", commentCount.toLocaleString()) : ""}
+    </div>
 
     ${polyRulesLimited.length || resSourceHtml ? `
     <div class="mi-card">
@@ -647,6 +957,8 @@ function renderPolymarketEvent(event, markets, accent, platformKey = "polymarket
       ${infoRow("End date", fmtDate(event.endDate))}
       ${infoRow("Expected resolution", fmtDate(event.resolutionDate))}
     </div>` : ""}
+
+    ${betSimHtml}
 
     ${analyticsHtml}
 
@@ -700,7 +1012,6 @@ async function analyze() {
   if      (lowerUrl.includes("kalshi"))     platform = "kalshi"
   else if (lowerUrl.includes("polymarket")) platform = "polymarket"
   else if (lowerUrl.includes("gemini"))     platform = "gemini"
-  else if (lowerUrl.includes("coinbase"))   platform = "coinbase"
 
   const accent = (PLATFORMS[platform] || {}).accent || "#555"
 
@@ -739,32 +1050,42 @@ async function analyze() {
       resetBtn()
     }
 
-  } else if (platform === "kalshi" || platform === "gemini") {
+  } else if (platform === "kalshi") {
     try {
-      let ticker = ""
-      if (platform === "kalshi") {
-        if (!url.includes("/markets/") && !url.includes("/events/")) {
-          throw new Error("Invalid Kalshi URL. Expected: kalshi.com/markets/<ticker> or kalshi.com/events/<ticker>")
-        }
-        const cleanPath = url.split("?")[0].split("#")[0].replace(/\/$/, "")
-        ticker = cleanPath.split("/").pop().toUpperCase()
-      } else {
-        if (!lowerUrl.includes("/prediction-markets/") && !lowerUrl.includes("/predictions/")) {
-          throw new Error("Invalid Gemini URL. Expected: gemini.com/prediction-markets/<ticker>")
-        }
-        const cleanPath = url.split("?")[0].split("#")[0].replace(/\/$/, "")
-        ticker = cleanPath.split("/").pop().toUpperCase()
-        if (!ticker || ticker === "PREDICTION-MARKETS" || ticker === "PREDICTIONS") {
-          throw new Error("Invalid Gemini URL. Expected: gemini.com/prediction-markets/<ticker>")
-        }
+      if (!url.includes("/markets/") && !url.includes("/events/")) {
+        throw new Error("Invalid Kalshi URL. Expected: kalshi.com/markets/<ticker> or kalshi.com/events/<ticker>")
+      }
+      const cleanPath = url.split("?")[0].split("#")[0].replace(/\/$/, "")
+      const pathParts = cleanPath.split("/")
+      const marketsIdx = pathParts.findIndex(p => p === "markets" || p === "events")
+      const eventTicker = marketsIdx !== -1 && pathParts[marketsIdx + 1]
+        ? pathParts[marketsIdx + 1].toUpperCase()
+        : null
+      const ticker = pathParts[pathParts.length - 1].toUpperCase()
+
+      let data = null
+      if (eventTicker && eventTicker !== ticker) {
+        const eventRes = await fetch(`/api/kalshi?ticker=${encodeURIComponent(eventTicker)}`)
+        if (eventRes.ok) data = await eventRes.json()
       }
 
-      const res = await fetch(`/api/kalshi?ticker=${encodeURIComponent(ticker)}`)
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || `API error ${res.status}`)
+      if (!data || (!data.event && !data.market)) {
+        const res = await fetch(`/api/kalshi?ticker=${encodeURIComponent(ticker)}`)
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || `API error ${res.status}`)
+        }
+        data = await res.json()
+      }
 
       if (data.event) {
-        result.innerHTML = renderKalshiEvent(data.event, accent, platform)
+        data.event._allMarkets = [...(data.event.markets || [])]
+
+        if (ticker !== eventTicker && data.event.markets && !data.event.mutually_exclusive) {
+          const specific = data.event.markets.filter(m => m.ticker?.toUpperCase() === ticker)
+          if (specific.length > 0) data.event.markets = specific
+        }
+        result.innerHTML = renderKalshiEvent(data.event, accent)
       } else if (data.market) {
         const m = data.market
         const fakeEvent = {
@@ -774,10 +1095,41 @@ async function analyze() {
           markets: [m],
           product_metadata: {},
         }
-        result.innerHTML = renderKalshiEvent(fakeEvent, accent, platform)
+        result.innerHTML = renderKalshiEvent(fakeEvent, accent)
       } else {
         throw new Error("Unexpected API response.")
       }
+    } catch (err) {
+      console.error(err)
+      showError(`ERROR: ${err.message}`)
+    } finally {
+      resetBtn()
+    }
+
+  } else if (platform === "gemini") {
+    try {
+      if (!lowerUrl.includes("/prediction-markets/") && !lowerUrl.includes("/predictions/")) {
+        throw new Error("Invalid Gemini URL. Expected: gemini.com/prediction-markets/<ticker>")
+      }
+      const cleanPath = url.split("?")[0].split("#")[0].replace(/\/$/, "")
+      const pathParts = cleanPath.split("/").filter(Boolean)
+      const predictionsIdx = pathParts.findIndex(p => p.toLowerCase() === "predictions" || p.toLowerCase() === "prediction-markets")
+      const ticker = predictionsIdx !== -1 && pathParts[predictionsIdx + 1]
+        ? pathParts[predictionsIdx + 1]
+        : pathParts[pathParts.length - 1]
+      if (!ticker || ticker.toLowerCase() === "prediction-markets" || ticker.toLowerCase() === "predictions") {
+        throw new Error("Invalid Gemini URL. Expected: gemini.com/prediction-markets/<ticker>")
+      }
+
+      const res = await fetch(`/api/gemini?ticker=${encodeURIComponent(ticker)}`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || `API error ${res.status}`)
+      }
+      const data = await res.json()
+      if (!data || !data.title) throw new Error("No event data returned.")
+
+      result.innerHTML = renderGeminiEvent(data, accent)
     } catch (err) {
       console.error(err)
       showError(`ERROR: ${err.message}`)

@@ -994,9 +994,9 @@ async function analyze() {
   }
 
   // Expand a bare Gemini ticker (e.g. "NBA-2603151930-DET-TOR-M") to a full URL
-  const geminiTickerRe = /^[A-Z][A-Z0-9]*(-[A-Z0-9]+){2,}$/
+  const geminiTickerRe = /^[A-Z][A-Z0-9]*(-[A-Z0-9]+){2,}$/i
   if (geminiTickerRe.test(url)) {
-    url = `https://www.gemini.com/predictions/${url}`
+    url = `https://www.gemini.com/predictions/${url.toUpperCase()}`
   }
 
   const lowerUrl = url.toLowerCase()

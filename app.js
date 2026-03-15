@@ -568,9 +568,9 @@ function renderGeminiEvent(event, accent) {
     // Binary: show YES and NO from a single contract price
     const c = contracts[0]
     const cp    = c.prices || {}
-    const price = parseFloat(cp.lastTradePrice || cp.bestAsk || cp.bestBid || c.lastPrice || c.price || c.bestAsk || 0)
-    const bid   = parseFloat(cp.bestBid || c.bestBid || c.bid || price)
-    const ask   = parseFloat(cp.bestAsk || c.bestAsk || c.ask || price)
+    const price = parseFloat(cp.lastTradePrice || cp.last || cp.mark || cp.mid || cp.close || cp.bestAsk || cp.bestBid || cp.ask || cp.bid || c.lastPrice || c.currentPrice || c.lastSalePrice || c.midpoint || c.mid || c.mark || c.price || c.bestAsk || c.ask || c.probability || 0)
+    const bid   = parseFloat(cp.bestBid || cp.bid || c.bestBid || c.bid || price)
+    const ask   = parseFloat(cp.bestAsk || cp.ask || c.bestAsk || c.ask || price)
     const pctYes = Math.round(price * 100)
     const pctNo  = 100 - pctYes
     const extras = Number.isFinite(bid) && Number.isFinite(ask) && ask > 0
@@ -601,9 +601,9 @@ function renderGeminiEvent(event, accent) {
       }
       // Gemini nests prices under c.prices.{lastTradePrice,bestBid,bestAsk}
       const cp    = c.prices || {}
-      const price = parseFloat(cp.lastTradePrice || cp.bestAsk || cp.bestBid || c.lastPrice || c.midpoint || c.mid || c.price || c.bestAsk || 0)
-      const bid   = parseFloat(cp.bestBid || c.bestBid || c.bid || price)
-      const ask   = parseFloat(cp.bestAsk || c.bestAsk || c.ask || price)
+      const price = parseFloat(cp.lastTradePrice || cp.last || cp.mark || cp.mid || cp.close || cp.bestAsk || cp.bestBid || cp.ask || cp.bid || c.lastPrice || c.currentPrice || c.lastSalePrice || c.midpoint || c.mid || c.mark || c.price || c.bestAsk || c.ask || c.probability || 0)
+      const bid   = parseFloat(cp.bestBid || cp.bid || c.bestBid || c.bid || price)
+      const ask   = parseFloat(cp.bestAsk || cp.ask || c.bestAsk || c.ask || price)
       const pct   = Math.round(price * 100)
       const extras = {}
       if (Number.isFinite(bid) && Number.isFinite(ask) && ask > 0) {
@@ -967,7 +967,7 @@ let _analyzing = false
 async function analyze() {
   if (_analyzing) return
 
-  const url = document.getElementById("urlInput").value.trim()
+  let url = document.getElementById("urlInput").value.trim()
   const result = document.getElementById("result")
   const btn = document.querySelector(".search-row button")
 
@@ -993,12 +993,22 @@ async function analyze() {
     btn.style.cursor = ""
   }
 
+  // Expand a bare Gemini ticker (e.g. "NBA-2603151930-DET-TOR-M") to a full URL
+  const geminiTickerRe = /^[A-Z][A-Z0-9]*(-[A-Z0-9]+){2,}$/i
+  console.log("[debug] raw url:", JSON.stringify(url))
+  console.log("[debug] ticker regex test:", geminiTickerRe.test(url))
+  if (geminiTickerRe.test(url)) {
+    url = `https://www.gemini.com/predictions/${url.toUpperCase()}`
+    console.log("[debug] expanded to:", url)
+  }
+
   const lowerUrl = url.toLowerCase()
   let platform = "unknown"
   if      (lowerUrl.includes("kalshi"))     platform = "kalshi"
   else if (lowerUrl.includes("polymarket")) platform = "polymarket"
   else if (lowerUrl.includes("coinbase"))   platform = "coinbase"
   else if (lowerUrl.includes("gemini"))     platform = "gemini"
+  console.log("[debug] platform:", platform)
 
   const accent = (PLATFORMS[platform] || {}).accent || "#555"
 
@@ -1115,6 +1125,7 @@ async function analyze() {
       }
       const data = await res.json()
       if (!data || !data.title) throw new Error("No event data returned.")
+      console.log("[Gemini] raw event data:", JSON.stringify(data, null, 2))
 
       result.innerHTML = renderGeminiEvent(data, accent)
     } catch (err) {

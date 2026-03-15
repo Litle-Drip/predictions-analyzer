@@ -544,7 +544,7 @@ function renderKalshiEvent(ev, accent) {
 
 function renderGeminiEvent(event, accent) {
   const status = (event.status || "").toLowerCase()
-  const isOpen = status === "active"
+  const isOpen = status === "active" || status === "approved" || status === "open"
   const statusDot  = isOpen ? "dot-green" : "dot-red"
   const statusText = isOpen ? "OPEN" : status.toUpperCase() || "CLOSED"
 
@@ -572,13 +572,23 @@ function renderGeminiEvent(event, accent) {
     if (ask > 0) analyticsCandidates.push({ prob: price, label: "YES", ask, bid: bid || price })
   } else {
     contracts.forEach((c, idx) => {
-      const rawName = [c.title, c.description, c.name, c.instrumentSymbol]
+      // Prefer instrumentSymbol over name — symbols are uppercase and fully qualified,
+      // whereas c.name is often a lowercase slug like "2603151930-pur-mich-m-mich"
+      const rawName = [c.title, c.description, c.instrumentSymbol, c.name]
         .find(v => typeof v === "string" && v.trim()) || `Outcome ${idx + 1}`
-      // Extract human-readable name from contract symbols like GEMI-TPC2026WIN-ABERG
+      // If the value contains dashes (slug/symbol), extract the last meaningful segment:
+      // "NCAAM-2603151930-PUR-MICH-M-MICH" → "Mich"
+      // "2603151930-pur-mich-m-mich" → "Mich"
+      // "GEMI-TPC2026WIN-ABERG" → "Aberg"
       let name = rawName
-      const symbolMatch = rawName.match(/^[A-Z]+-[A-Z0-9]+-(.+)$/)
-      if (symbolMatch) {
-        name = symbolMatch[1].charAt(0).toUpperCase() + symbolMatch[1].slice(1).toLowerCase()
+      if (rawName.includes("-")) {
+        const parts = rawName.split("-")
+        // Filter out pure-numeric segments and single-char segments (like the trailing "M" in sports tickers)
+        const meaningful = parts.filter(p => p.length > 1 && !/^\d+$/.test(p))
+        const lastPart = meaningful[meaningful.length - 1] || parts[parts.length - 1]
+        if (lastPart) {
+          name = lastPart.charAt(0).toUpperCase() + lastPart.slice(1).toLowerCase()
+        }
       }
       // Gemini nests prices under c.prices.{lastTradePrice,bestBid,bestAsk}
       const cp    = c.prices || {}
@@ -603,9 +613,10 @@ function renderGeminiEvent(event, accent) {
   if (!allRows.length) return `<div class="mi-error">No outcome data found for this event.</div>`
   const outcomesHtml = buildOutcomesHtml(allRows)
 
-  // Stats
+  // Stats — fall back to contract-level aggregation when event-level fields are missing
+  const contractLiq = contracts.reduce((s, c) => s + parseFloat(c.liquidity || c.notionalLiquidity || 0), 0)
   const totalVol = fmtNum(parseFloat(event.volume || event.notionalVolume || 0))
-  const totalLiq = fmtNum(parseFloat(event.liquidity || 0))
+  const totalLiq = fmtNum(parseFloat(event.liquidity || contractLiq || 0))
   const totalOI  = fmtNum(parseFloat(event.openInterest || 0))
 
   // Tags
@@ -640,6 +651,17 @@ function renderGeminiEvent(event, accent) {
 
   // Bet explainer from description
   const desc = event.description || ""
+  // Build human-readable outcome names list for explainer (reuse the same name-extraction logic)
+  const contractNames = contracts.map(c => {
+    const raw = [c.title, c.description, c.instrumentSymbol, c.name]
+      .find(v => typeof v === "string" && v.trim()) || ""
+    if (!raw.includes("-")) return raw
+    const parts = raw.split("-")
+    const meaningful = parts.filter(p => p.length > 1 && !/^\d+$/.test(p))
+    const last = meaningful[meaningful.length - 1] || parts[parts.length - 1]
+    return last ? last.charAt(0).toUpperCase() + last.slice(1).toLowerCase() : raw
+  }).filter(Boolean)
+
   let betExplainerText = ""
   if (desc) {
     betExplainerText = applyResolveText(desc)
@@ -649,8 +671,21 @@ function renderGeminiEvent(event, accent) {
       .join(" ")
   }
 
-  // Resolution rules
+  // Resolution rules — for head-to-head (2-outcome, non-binary), auto-generate if description is bare
   const ruleSentences = desc ? plainEnglishRules(desc).slice(0, 8) : []
+  const isHeadToHead = !isBinary && contracts.length === 2
+  if (isHeadToHead && ruleSentences.length === 0 && contractNames.length === 2) {
+    const [a, b] = contractNames
+    ruleSentences.push(
+      `Pick which team wins: ${a} or ${b}`,
+      `If ${a} wins the game, the "${a}" contract resolves YES and pays $1`,
+      `If ${b} wins the game, the "${b}" contract resolves YES and pays $1`,
+      `The losing team's contract resolves NO and expires worthless`
+    )
+    if (!betExplainerText) {
+      betExplainerText = `Bet on the winner: ${a} or ${b}. Each contract pays $1 if your team wins. Only one side can win — the other expires at $0.`
+    }
+  }
 
   // Bet sim
   const leadPct = analyticsCandidates.length ? Math.round(analyticsCandidates[0].prob * 100) : 0

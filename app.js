@@ -605,7 +605,7 @@ function renderGeminiEvent(event, accent) {
 
   // Stats
   const totalVol = fmtNum(parseFloat(event.volume || event.notionalVolume || 0))
-  const totalLiq = fmtNum(parseFloat(event.liquidity || event.openInterest || 0))
+  const totalLiq = fmtNum(parseFloat(event.liquidity || 0))
   const totalOI  = fmtNum(parseFloat(event.openInterest || 0))
 
   // Tags
@@ -620,8 +620,12 @@ function renderGeminiEvent(event, accent) {
       return `<span class="tag-cat" style="color:${col};border-color:${col};background:${col}1a">${esc(String(t).toUpperCase())}</span>`
     }).join("")
 
-  // Urgency
-  const expiryIso = event.closeDate || event.expiryDate || event.endDate || event.resolvedAt || ""
+  // Urgency — pull close date from event, then fall back to first contract's close date
+  const contractCloseDate = contracts.length > 0
+    ? (contracts[0].closeDate || contracts[0].expiryDate || contracts[0].endDate || "")
+    : ""
+  const expiryIso = event.closeDate || event.expiryDate || event.endDate || contractCloseDate || event.resolvedAt || ""
+  const startIso  = event.openDate || event.startDate || event.effectiveDate || event.createdAt || ""
   const timeLeft = fmtTimeRemaining(expiryIso)
   const urgencyHtml = timeLeft
     ? `<div class="urgency-banner urgency-${timeLeft.urgency}">⏱ ${esc(timeLeft.text)}</div>`
@@ -668,10 +672,10 @@ function renderGeminiEvent(event, accent) {
 
     ${whatsTheBetCard(betExplainerText)}
 
-    ${(event.effectiveDate || expiryIso) ? `
+    ${(startIso || expiryIso) ? `
     <div class="mi-card">
       <div class="section-label">TIMELINE</div>
-      ${infoRow("Start date", fmtDate(event.openDate || event.startDate || event.effectiveDate || event.createdAt))}
+      ${infoRow("Start date", fmtDate(startIso))}
       ${infoRow("End date", fmtDate(expiryIso))}
       ${event.resolvedAt ? infoRow("Resolved", fmtDateTime(event.resolvedAt)) : ""}
     </div>` : ""}
@@ -706,7 +710,8 @@ function renderPolymarketEvent(event, markets, accent) {
 
   const allPolyRows = []
   const polyAnalyticsCandidates = []
-  markets.forEach((market, idx) => {
+  let colorIdx = 0
+  markets.forEach((market) => {
     let outcomes, prices
     try {
       outcomes = typeof market.outcomes === "string" ? JSON.parse(market.outcomes) : market.outcomes
@@ -714,25 +719,33 @@ function renderPolymarketEvent(event, markets, accent) {
     } catch (e) {
       return
     }
-    if (!prices || !Array.isArray(prices)) return
+    if (!Array.isArray(outcomes) || !Array.isArray(prices)) return
     const rawAsk = parseFloat(market.bestAsk)
     const rawBid = parseFloat(market.bestBid)
-    const bestAsk = Number.isFinite(rawAsk) ? rawAsk : null
-    const bestBid = Number.isFinite(rawBid) ? rawBid : null
-    ;(outcomes || []).forEach((name, i) => {
+    const bestAsk = Number.isFinite(rawAsk) && rawAsk > 0 ? rawAsk : null
+    const bestBid = Number.isFinite(rawBid) && rawBid > 0 ? rawBid : null
+    outcomes.forEach((name, i) => {
+      if (i >= prices.length) return
       const pct = Math.round(parseFloat(prices[i] || 0) * 100)
       const extras = {}
+      // bestBid/bestAsk from Polymarket API refer to the YES token (i=0).
+      // For NO (i>0), invert: NO ask = 1 - YES bid, NO bid = 1 - YES ask.
       if (bestBid != null && bestAsk != null) {
-        extras.bid = bestBid
-        extras.ask = bestAsk
+        if (i === 0) {
+          extras.bid = bestBid
+          extras.ask = bestAsk
+        } else {
+          extras.bid = Math.max(0, 1 - bestAsk)
+          extras.ask = Math.min(1, 1 - bestBid)
+        }
       }
-      allPolyRows.push(outcomeRow(name, "", pct, OUTCOME_COLORS[(idx + i) % OUTCOME_COLORS.length], null, extras))
+      allPolyRows.push(outcomeRow(name, "", pct, OUTCOME_COLORS[colorIdx % OUTCOME_COLORS.length], null, extras))
+      colorIdx++
 
       const prob = parseFloat(prices[i])
       if (!Number.isFinite(prob) || prob <= 0) return
-      let ask = bestAsk != null ? bestAsk : prob
-      if (ask <= 0) ask = prob
-      const bid = bestBid != null ? bestBid : prob
+      const ask = extras.ask != null ? extras.ask : prob
+      const bid = extras.bid != null ? extras.bid : prob
       polyAnalyticsCandidates.push({ prob, label: name ? String(name) : market.question || "YES", ask, bid })
     })
   })
@@ -905,7 +918,6 @@ async function analyze() {
   if      (lowerUrl.includes("kalshi"))     platform = "kalshi"
   else if (lowerUrl.includes("polymarket")) platform = "polymarket"
   else if (lowerUrl.includes("gemini"))     platform = "gemini"
-  else if (lowerUrl.includes("coinbase"))   platform = "coinbase"
 
   const accent = (PLATFORMS[platform] || {}).accent || "#555"
 
@@ -1022,7 +1034,7 @@ async function analyze() {
     }
 
   } else {
-    showError("Unrecognized URL · Paste a Kalshi, Polymarket, or Gemini link.")
+    showError("Unrecognized URL — paste a Kalshi, Polymarket, or Gemini prediction market link.")
     resetBtn()
   }
 }

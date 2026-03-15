@@ -967,7 +967,7 @@ let _analyzing = false
 async function analyze() {
   if (_analyzing) return
 
-  const url = document.getElementById("urlInput").value.trim()
+  let url = document.getElementById("urlInput").value.trim()
   const result = document.getElementById("result")
   const btn = document.querySelector(".search-row button")
 
@@ -991,6 +991,12 @@ async function analyze() {
     btn.textContent = "ANALYZE \u2197"
     btn.style.opacity = ""
     btn.style.cursor = ""
+  }
+
+  // Expand a bare Gemini ticker (e.g. "NBA-2603151930-DET-TOR-M") to a full URL
+  const geminiTickerRe = /^[A-Z][A-Z0-9]*(-[A-Z0-9]+){2,}$/
+  if (geminiTickerRe.test(url)) {
+    url = `https://www.gemini.com/predictions/${url}`
   }
 
   const lowerUrl = url.toLowerCase()

@@ -49,7 +49,7 @@ function fmtDate(iso) {
   if (!iso || typeof iso !== "string" || iso.startsWith("0001")) return "—"
   const d = new Date(iso)
   if (isNaN(d)) return "—"
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })
 }
 
 function fmtDateTime(iso) {
@@ -572,7 +572,7 @@ function renderGeminiEvent(event, accent) {
     if (ask > 0) analyticsCandidates.push({ prob: price, label: "YES", ask, bid: bid || price })
   } else {
     contracts.forEach((c, idx) => {
-      const rawName = c.title || c.description || c.name || c.instrumentSymbol || `Outcome ${idx + 1}`
+      const rawName = String(c.title || c.description || c.name || c.instrumentSymbol || `Outcome ${idx + 1}`)
       // Extract human-readable name from contract symbols like GEMI-TPC2026WIN-ABERG
       let name = rawName
       const symbolMatch = rawName.match(/^[A-Z]+-[A-Z0-9]+-(.+)$/)

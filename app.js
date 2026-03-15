@@ -1011,6 +1011,7 @@ async function analyze() {
   let platform = "unknown"
   if      (lowerUrl.includes("kalshi"))     platform = "kalshi"
   else if (lowerUrl.includes("polymarket")) platform = "polymarket"
+  else if (lowerUrl.includes("coinbase"))   platform = "coinbase"
   else if (lowerUrl.includes("gemini"))     platform = "gemini"
 
   const accent = (PLATFORMS[platform] || {}).accent || "#555"

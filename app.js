@@ -20,6 +20,11 @@ const GLOSSARY = {
   "SPREAD":           "Gap between the bid and ask price. Tighter spread = more liquid market.",
   "MONEYLINE":        "American odds format. -150 means bet $150 to win $100. +200 means bet $100 to win $200.",
   "BID / ASK":        "Bid = highest price a buyer will pay. Ask = lowest price a seller will accept.",
+  "TRADING OPENS":    "When this market first became available for trading — not necessarily when the real-world event starts.",
+  "BETTING CLOSES":   "The deadline to place or exit bets. After this time, no more trading is allowed. This is not necessarily when the real-world event happens.",
+  "EXPECTED RESOLUTION": "When the market is expected to be settled and payouts distributed, based on the exchange's schedule.",
+  "START DATE":       "When this market or event was created on the platform.",
+  "END DATE":         "The scheduled end date for this event on the platform — trading may close before or after the real-world event.",
 }
 
 function esc(str) {
@@ -214,10 +219,10 @@ function statCard(label, value) {
   return `<div class="stat-card"><div class="stat-label">${tip(label)}</div>${inner}</div>`
 }
 
-// Only render a timeline row if the value is a real date (not "—")
 function infoRow(key, val) {
   if (!val || val === "—") return ""
-  return `<div class="info-row"><span class="info-key">${esc(key)}</span><span class="info-val">${esc(val)}</span></div>`
+  const keyHtml = GLOSSARY[key.toUpperCase()] ? tip(key, key.toUpperCase()) : esc(key)
+  return `<div class="info-row"><span class="info-key">${keyHtml}</span><span class="info-val">${esc(val)}</span></div>`
 }
 
 function numList(sentences) {
@@ -233,6 +238,7 @@ function outcomeRow(label, sub, pct, color, delta = null, extras = {}) {
   const deltaHtml = delta !== null && delta !== 0
     ? `<span class="outcome-delta ${delta > 0 ? 'delta-up' : 'delta-dn'}">${delta > 0 ? '▲' : '▼'} ${Math.abs(delta)}</span>`
     : ""
+  const estTag = extras.isEstimate ? `<span class="est-tag">(est.)</span>` : ""
   const metaParts = []
   if (Number.isFinite(extras.bid) && Number.isFinite(extras.ask)) {
     metaParts.push(`${tip("Bid", "BID / ASK")} ${Math.round(extras.bid * 100)}¢ · ${tip("Ask", "BID / ASK")} ${Math.round(extras.ask * 100)}¢`)
@@ -251,7 +257,7 @@ function outcomeRow(label, sub, pct, color, delta = null, extras = {}) {
         </div>
         <div class="outcome-right">
           <span class="outcome-ml">${tip(ml, "MONEYLINE")}</span>
-          <span class="outcome-pct" style="color:${color}">${pct}%</span>
+          <span class="outcome-pct" style="color:${color}">${pct}%${estTag}</span>
           ${deltaHtml}
         </div>
       </div>
@@ -330,6 +336,7 @@ function renderKalshiEvent(ev, accent) {
     const lastPrice = parseFloat(m.last_price_dollars || 0)
     const yesBid    = parseFloat(m.yes_bid_dollars || 0)
     const yesAsk    = parseFloat(m.yes_ask_dollars || 0)
+    const isEstimate = lastPrice <= 0
     const pct = lastPrice > 0
       ? Math.round(lastPrice * 100)
       : yesAsk > 0 ? Math.round((yesBid + yesAsk) / 2 * 100) : Math.round(yesBid * 100)
@@ -342,7 +349,7 @@ function renderKalshiEvent(ev, accent) {
     const sub = isMultiOutcome ? "" : (m.rules_primary || "")
       .replace(/^If /, "").replace(/, then the market resolves to Yes\.?$/, "")
 
-    const extras = { bid: yesBid, ask: yesAsk }
+    const extras = { bid: yesBid, ask: yesAsk, isEstimate }
     if (isMultiOutcome) {
       const mVol = parseFloat(m.volume_fp || 0) / 100
       const mOI  = parseFloat(m.open_interest_fp || 0) / 100
@@ -370,9 +377,9 @@ function renderKalshiEvent(ev, accent) {
   const canCloseEarly = first.can_close_early
   const earlyCloseText = first.early_close_condition || (canCloseEarly ? "Possible" : "")
   const timelineRows  = [
-    infoRow("Start date", startDate),
-    infoRow("End / expiry", endDate),
-    infoRow("Resolution date", expDate),
+    infoRow("Trading opens", startDate),
+    infoRow("Betting closes", endDate),
+    infoRow("Expected resolution", expDate),
     earlyCloseText ? `<div class="info-row"><span class="info-key">${esc("Early close")}</span><span class="info-val">${esc(earlyCloseText)}</span></div>` : "",
   ].join("")
 
@@ -473,10 +480,10 @@ function renderKalshiEvent(ev, accent) {
     ${analyticsHtml}
 
     <div class="stats-grid">
-      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
-      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : null)}
-      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
-      ${statCard("OPEN INTEREST", totalOI ? `$${totalOI}` : null)}
+      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : "—")}
+      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : "—")}
+      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : "—")}
+      ${statCard("OPEN INTEREST", totalOI ? `$${totalOI}` : "—")}
     </div>
   `
 }
@@ -635,15 +642,16 @@ function renderPolymarketEvent(event, markets, accent) {
       <div class="section-label">TIMELINE</div>
       ${infoRow("Start date", fmtDate(event.startDate))}
       ${infoRow("End date", fmtDate(event.endDate))}
+      ${infoRow("Expected resolution", fmtDate(event.resolutionDate))}
     </div>` : ""}
 
     ${analyticsHtml}
 
     <div class="stats-grid">
-      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : null)}
-      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : null)}
-      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : null)}
-      ${commentCount > 0 ? statCard("COMMENTS", commentCount.toLocaleString()) : ""}
+      ${statCard("VOLUME TRADED", totalVol ? `$${totalVol}` : "—")}
+      ${statCard("24H VOLUME", totalVol24 ? `$${totalVol24}` : "—")}
+      ${statCard("LIQUIDITY", totalLiq ? `$${totalLiq}` : "—")}
+      ${statCard("COMMENTS", commentCount > 0 ? commentCount.toLocaleString() : "—")}
     </div>
   `
 }

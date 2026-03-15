@@ -41,7 +41,11 @@ Node.js web app that analyzes Kalshi and Polymarket prediction markets. Users pa
 - `analyticsCard(rows, timeLeft)` renders the TRADER ANALYTICS card
 - `plainEnglishRules(text)` strips legal language from contract rules
 - `whatsTheBetCard(text)` renders the "WHAT'S THE BET?" explainer card
-- `betSimulatorHtml(pct, platform)` renders bet calculator; `updateBetSim()` handles live updates
+- `betSimulatorHtml(pct)` renders bet calculator; `updateBetSim()` handles live updates
+- Timeline date labels: Kalshi uses "Trading opens" / "Betting closes" / "Expected resolution"; Polymarket uses "Start date" / "End date" / "Expected resolution"
+- `infoRow(key, val)` auto-adds glossary tooltips when the key matches a GLOSSARY entry
+- Probability `(est.)` tag: shown on Kalshi outcomes when `last_price_dollars` is absent and the probability is derived from bid/ask midpoint
+- Stats display: missing values show "—" instead of "$0" or empty
 
 ## Secrets
 - `KALSHI_API_KEY_ID` — Kalshi API key member ID

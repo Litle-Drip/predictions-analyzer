@@ -209,6 +209,22 @@ function normalizeKalshi(ev, platformKey = "kalshi") {
       : `Bet on which outcome will happen for ${eventName}. You win if your chosen outcome is correct.${ev.mutually_exclusive ? " Only one outcome can win — winner takes all." : ""}`
   }
 
+  // Resolution sources
+  const rawSources = first.settlement_sources || ev.settlement_sources || []
+  const validSources = rawSources.filter(s => {
+    const url = typeof s === "string" ? s : s?.url
+    try { const u = new URL(url); return u.protocol === "http:" || u.protocol === "https:" } catch { return false }
+  })
+  const resSourceHtml = validSources.length
+    ? `<div class="info-row" style="border-bottom:none"><span class="info-key">Resolution source${validSources.length > 1 ? "s" : ""}</span><span class="info-val">${
+        validSources.map(s => {
+          const url  = typeof s === "string" ? s : s.url
+          const name = typeof s === "object" && s.name ? s.name : url.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
+          return `<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--orange)">${esc(name)}</a>`
+        }).join(" · ")
+      }</span></div>`
+    : ""
+
   // Rules
   const rulesRaw = first.rules_secondary || (!isMultiOutcome ? first.rules_primary : "") || ""
   const ruleSentences = plainEnglishRules(rulesRaw)
@@ -238,7 +254,7 @@ function normalizeKalshi(ev, platformKey = "kalshi") {
     leadPct,
     betExplainerText,
     ruleSentences,
-    resSourceHtml: "",
+    resSourceHtml,
   }
 }
 
@@ -517,8 +533,15 @@ function normalizePolymarket(event, markets, platformKey = "polymarket") {
       } catch(e) {}
     }
   }
+  let resSourceLabel = ""
+  if (resSource) {
+    try {
+      const u = new URL(resSource)
+      resSourceLabel = u.hostname.replace(/^www\./, "")
+    } catch { resSourceLabel = resSource.replace(/^https?:\/\//, "").split("/")[0] }
+  }
   const resSourceHtml = resSource
-    ? `<div class="info-row" style="border-bottom:none"><span class="info-key">Resolution source</span><span class="info-val"><a href="${esc(resSource)}" target="_blank" rel="noopener" style="color:var(--orange)">${esc(resSource.replace(/^https?:\/\//, "").split("/")[0])}</a></span></div>`
+    ? `<div class="info-row" style="border-bottom:none"><span class="info-key">Resolution source</span><span class="info-val"><a href="${esc(resSource)}" target="_blank" rel="noopener" style="color:var(--orange)">${esc(resSourceLabel)}</a></span></div>`
     : ""
 
   // Timeline
